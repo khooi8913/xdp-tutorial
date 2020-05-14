@@ -97,7 +97,8 @@ struct record {
 };
 
 struct stats_record {
-	struct record stats[1]; /* Assignment#2: Hint */
+	// struct record stats[2]; /* Assignment#2: Hint */
+	struct record stats[XDP_ACTION_MAX]; /* Assignment#2: Hint */
 };
 
 static double calc_period(struct record *r, struct record *p)
@@ -120,14 +121,39 @@ static void stats_print(struct stats_record *stats_rec,
 	__u64 packets;
 	double pps; /* packets per sec */
 
+	/* Assignment#1 */
+	__u64 bytes;
+	double bps;
+	
+	// {
+	// 	char *fmt = "%-12s %'11lld pkts (%'10.0f pps)"
+	// 		" %'11lld Kbytes (%'6.0f bps)"
+	// 		" period:%f\n";
+	// 	const char *action = action2str(XDP_PASS);
+	// 	rec  = &stats_rec->stats[0];
+	// 	prev = &stats_prev->stats[0];
+
+	// 	period = calc_period(rec, prev);
+	// 	if (period == 0)
+	// 	       return;
+
+	// 	packets = rec->total.rx_packets - prev->total.rx_packets;
+	// 	pps     = packets / period;
+
+	// 	bytes = rec->total.rx_bytes - prev->total.rx_bytes;
+	// 	bps = (bytes/period)*8;
+
+	// 	printf(fmt, action, rec->total.rx_packets, pps, rec->total.rx_bytes, bps,period);
+	// }
+
 	/* Assignment#2: Print other XDP actions stats  */
-	{
+	for(int i = XDP_ABORTED; i <= XDP_REDIRECT; i++) {
 		char *fmt = "%-12s %'11lld pkts (%'10.0f pps)"
-			//" %'11lld Kbytes (%'6.0f Mbits/s)"
+			" %'11lld Kbytes (%'6.0f bps)"
 			" period:%f\n";
-		const char *action = action2str(XDP_PASS);
-		rec  = &stats_rec->stats[0];
-		prev = &stats_prev->stats[0];
+		const char *action = action2str(i);
+		rec  = &stats_rec->stats[i];
+		prev = &stats_prev->stats[i];
 
 		period = calc_period(rec, prev);
 		if (period == 0)
@@ -136,7 +162,10 @@ static void stats_print(struct stats_record *stats_rec,
 		packets = rec->total.rx_packets - prev->total.rx_packets;
 		pps     = packets / period;
 
-		printf(fmt, action, rec->total.rx_packets, pps, period);
+		bytes = rec->total.rx_bytes - prev->total.rx_bytes;
+		bps = (bytes/period)*8;
+
+		printf(fmt, action, rec->total.rx_packets, pps, rec->total.rx_bytes, bps,period);
 	}
 }
 
@@ -153,10 +182,24 @@ void map_get_value_array(int fd, __u32 key, struct datarec *value)
 void map_get_value_percpu_array(int fd, __u32 key, struct datarec *value)
 {
 	/* For percpu maps, userspace gets a value per possible CPU */
-	// unsigned int nr_cpus = bpf_num_possible_cpus();
-	// struct datarec values[nr_cpus];
+	unsigned int nr_cpus = bpf_num_possible_cpus();
+	struct datarec values[nr_cpus];
+	__u64 sum_pkts = 0;
+	__u64 sum_bytes = 0;
+	int i;
 
-	fprintf(stderr, "ERR: %s() not impl. see assignment#3", __func__);
+	if ((bpf_map_lookup_elem(fd, &key, values)) != 0) {
+		fprintf(stderr,
+			"ERR: bpf_map_lookup_elem failed key:0x%X\n", key);
+		return;
+	}
+
+	for (i = 0; i < nr_cpus; i++) {
+		sum_pkts  += values[i].rx_packets;
+		sum_bytes += values[i].rx_bytes;
+	}
+	value->rx_packets = sum_pkts;
+	value->rx_bytes   = sum_bytes;
 }
 
 static bool map_collect(int fd, __u32 map_type, __u32 key, struct record *rec)
@@ -171,26 +214,31 @@ static bool map_collect(int fd, __u32 map_type, __u32 key, struct record *rec)
 		map_get_value_array(fd, key, &value);
 		break;
 	case BPF_MAP_TYPE_PERCPU_ARRAY:
-		/* fall-through */
+		/* Assignment#3 */
+		map_get_value_percpu_array(fd, key, &value);
+		break;
 	default:
-		fprintf(stderr, "ERR: Unknown map_type(%u) cannot handle\n",
-			map_type);
+		fprintf(stderr, "ERR: Unknown map_type(%u) cannot handle\n", map_type);
 		return false;
 		break;
 	}
 
 	/* Assignment#1: Add byte counters */
 	rec->total.rx_packets = value.rx_packets;
+	rec->total.rx_bytes = value.rx_bytes;
 	return true;
 }
 
 static void stats_collect(int map_fd, __u32 map_type,
 			  struct stats_record *stats_rec)
 {
-	/* Assignment#2: Collect other XDP actions stats  */
-	__u32 key = XDP_PASS;
+	// __u32 key = XDP_PASS;
+	// map_collect(map_fd, map_type, key, &stats_rec->stats[0]);
 
-	map_collect(map_fd, map_type, key, &stats_rec->stats[0]);
+	/* Assignment#2: Collect other XDP actions stats  */
+	for(int i = XDP_ABORTED; i <= XDP_REDIRECT; i++) {
+		map_collect(map_fd, map_type, i, &stats_rec->stats[i]);
+	}
 }
 
 static void stats_poll(int map_fd, __u32 map_type, int interval)
