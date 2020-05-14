@@ -45,6 +45,9 @@ static const struct option_wrapper long_options[] = {
 	{{"force",       no_argument,		NULL, 'F' },
 	 "Force install, replacing existing program on interface"},
 
+	{{"reuse",      no_argument,		NULL, 'R' },
+	 "Reuse existing pinned map"},
+
 	{{"unload",      no_argument,		NULL, 'U' },
 	 "Unload XDP program instead of loading"},
 
@@ -66,6 +69,8 @@ static const struct option_wrapper long_options[] = {
 
 const char *pin_basedir =  "/sys/fs/bpf";
 const char *map_name    =  "xdp_stats_map";
+
+bool reuse_pinned_maps = true;
 
 /* Pinning maps under /sys/fs/bpf in subdir */
 int pin_maps_in_bpf_object(struct bpf_object *bpf_obj, const char *subdir)
@@ -89,9 +94,18 @@ int pin_maps_in_bpf_object(struct bpf_object *bpf_obj, const char *subdir)
 
 	/* Existing/previous XDP prog might not have cleaned up */
 	if (access(map_filename, F_OK ) != -1 ) {
+		/* TODO: Study how to reuse maps */
+		// if (verbose)
+		// 	printf(" - Reusing prev maps in %s/\n", pin_dir);
+
+		// printf("%s\n", map_filename);
+		// int pinned_map_fd = bpf_obj_get(map_filename);
+		// printf("%f\n", pinned_map_fd);
+		// struct bpf_map *map = bpf_object__find_map_by_name(bpf_obj, "xdp_stats_map");
+		// err = bpf_map__reuse_fd(map, pinned_map_fd);
+
 		if (verbose)
-			printf(" - Unpinning (remove) prev maps in %s/\n",
-			       pin_dir);
+			printf(" - Unpinning (remove) prev maps in %s/\n", pin_dir);
 
 		/* Basically calls unlink(3) on map_filename */
 		err = bpf_object__unpin_maps(bpf_obj, pin_dir);
@@ -100,6 +114,7 @@ int pin_maps_in_bpf_object(struct bpf_object *bpf_obj, const char *subdir)
 			return EXIT_FAIL_BPF;
 		}
 	}
+	
 	if (verbose)
 		printf(" - Pinning maps in %s/\n", pin_dir);
 
@@ -132,14 +147,14 @@ int main(int argc, char **argv)
 		usage(argv[0], __doc__, long_options, (argc == 1));
 		return EXIT_FAIL_OPTION;
 	}
+
 	if (cfg.do_unload) {
 		/* TODO: Miss unpin of maps on unload */
 		return xdp_link_detach(cfg.ifindex, cfg.xdp_flags, 0);
 	}
-
+	
 	bpf_obj = load_bpf_and_xdp_attach(&cfg);
-	if (!bpf_obj)
-		return EXIT_FAIL_BPF;
+	if (!bpf_obj)	return EXIT_FAIL_BPF;
 
 	if (verbose) {
 		printf("Success: Loaded BPF-object(%s) and used section(%s)\n",
